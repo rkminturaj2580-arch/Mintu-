@@ -1,0 +1,126 @@
+name: Build APK
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Verify Java version
+        run: java -version
+
+      - name: Set up Gradle 9.3.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+
+      - name: Verify Gradle version
+        run: gradle --version
+
+      - name: Generate temporary debug keystore
+        run: |
+          if [ -f "debug.keystore.base64" ]; then
+            base64 -d debug.keystore.base64 > debug.keystore
+          elif [ ! -f "debug.keystore" ]; then
+            keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          fi
+
+      - name: Build debug APK
+        run: gradle :app:assembleDebug --stacktrace --no-daemon
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        id: publish_release
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG_NAME="v${{ github.run_number }}.${{ github.run_attempt }}"
+          RELEASE_TITLE="Mintu Raj AI Music v${{ github.run_number }}.${{ github.run_attempt }}"
+          APK_ASSET="MintuRajAIMusic-v${{ github.run_number }}.${{ github.run_attempt }}-debug.apk"
+
+          cp app/build/outputs/apk/debug/app-debug.apk "$APK_ASSET"
+
+          gh release create "$TAG_NAME" "$APK_ASSET" \
+            --target "${{ github.sha }}" \
+            --title "$RELEASE_TITLE" \
+            --notes "Automated APK build for commit ${{ github.sha }}." \
+            --latest
+
+      - name: Report APK download result
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG_NAME="v${{ github.run_number }}.${{ github.run_attempt }}"
+          APK_ASSET="MintuRajAIMusic-v${{ github.run_number }}.${{ github.run_attempt }}-debug.apk"
+
+          if [ "${{ steps.publish_release.outcome }}" = "success" ]; then
+            echo "=========================================="
+            echo "Release publishing succeeded!"
+            echo "=========================================="
+            
+            gh release view "$TAG_NAME"
+            
+            RELEASE_TITLE=$(gh release view "$TAG_NAME" --json title --jq .title)
+            RELEASE_URL=$(gh release view "$TAG_NAME" --json url --jq .url)
+            
+            echo "Release Tag: $TAG_NAME"
+            echo "Release Title: $RELEASE_TITLE"
+            echo "Release Page URL: $RELEASE_URL"
+            echo "APK Asset Filename: $APK_ASSET"
+            
+            {
+              echo "### :rocket: APK Release Published Successfully"
+              echo ""
+              echo "- **Release Tag:** \`$TAG_NAME\`"
+              echo "- **Release Title:** $RELEASE_TITLE"
+              echo "- **Direct Release Page:** [$RELEASE_URL]($RELEASE_URL)"
+              echo "- **APK Asset Filename:** \`$APK_ASSET\`"
+              echo ""
+              echo ":inbox_tray: The APK can be downloaded directly from the **Assets** section of the [GitHub Release page]($RELEASE_URL)."
+              echo ""
+              echo ":shield: **Backup:** The normal Actions artifact named \`app-debug-apk\` is also available as a backup under the Artifacts section."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "=========================================="
+            echo "WARNING: Release publishing was not successful."
+            echo "=========================================="
+            echo "The APK build succeeded."
+            echo "The Actions artifact named app-debug-apk remains available."
+            
+            {
+              echo "### :warning: Release Publishing Warning"
+              echo ""
+              echo "> **Notice:** GitHub Release publishing did not complete successfully or was skipped."
+              echo ""
+              echo "- :white_check_mark: The **APK build succeeded**."
+              echo "- :package: The Actions artifact named \`app-debug-apk\` **remains available** for download from the Artifacts section of this workflow run."
+              echo "- :information_source: No release URL was published."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi

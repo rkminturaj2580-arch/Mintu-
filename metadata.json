@@ -1,0 +1,6 @@
+{
+  "name": "Mintu Raj AI Music",
+  "description": "Premium AI Music Studio for generating songs, lyrics, vocals, stems, and instrumental tracks with audio synthesis and multi-language support.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
